@@ -1,31 +1,12 @@
 module CssParser # :nodoc:
-  # == Ruby CssParser
+  # == Parser class
   #
-  # Load, parse and cascade CSS rules.
+  # All CSS is converted to UTF-8.
   #
-  # ==== Installation
-  # Install the gem from RubyGems.
-  #
-  #   gem install css_parser
-  #
-  # ==== Configuration
-  # [<tt>absolute_paths</tt>] Convert relative paths to absolute paths (<tt>href</tt>, <tt>src</tt> and <tt>url('')</tt>. Boolean, default is <tt>true</tt>.
-  #
-  # ==== Example
-  #   parser = CssParser::Parser.new
-  #   parser.load_file!('http://example.com/styles/style.css')
-  #
-  #   parser.find('#content')
-  #   => 'font-size: 13px; line-height: 1.2;'
-  #
-  #   parser.each_selector([:screen, :handheld]) do |selector, declarations, specificity|
-  #     puts "Selector: #{selector}"
-  #     puts "Declarations: #{declarations}"
-  #     puts "Specificity: #{specificity.to_s}"
-  #   end
-  #
-  # ==== Credits
-  # By Alex Dunae (dunae.ca, e-mail 'code' at the same domain), 2007
+  # When calling Parser#new there are some configuaration options:
+  # [<tt>absolute_paths</tt>] Convert relative paths to absolute paths (<tt>href</tt>, <tt>src</tt> and <tt>url('')</tt>. Boolean, default is <tt>false</tt>.
+  # [<tt>import</tt>] Follow <tt>@import</tt> rules. Boolean, default is <tt>true</tt>.
+  # [<tt>not_found_exceptions</tt>] Throw an exception if a link can not be found. Boolean, default is <tt>true</tt>.
   class Parser
     include CssParser::Shorthand
 
@@ -42,17 +23,28 @@ module CssParser # :nodoc:
     # RE_AT_IMPORT_RULE = Regexp.new('@import[\s]*(' + RE_STRING.to_s + ')([\w\s\,]*)[;]?', Regexp::IGNORECASE) -- should handle url() even though it is not allowed
     #++
 
-    # CSS files in the order they were encountered
-    attr_reader   :css_source    
+    # Array of CSS files that have been loaded.
+    attr_reader   :loaded_uris
 
-    attr_reader   :rules
+    #attr_reader   :rules
+
+    #--
+    # Class variable? see http://www.oreillynet.com/ruby/blog/2007/01/nubygems_dont_use_class_variab_1.html
+    #++
+    @folded_declaration_cache = {}
+    class << self; attr_reader :folded_declaration_cache; end
 
     def initialize(options = {})
-      @options = {:absolute_paths => true}.merge(options)
+      @options = {:absolute_paths => false,
+                  :import => true,
+                  :not_found_exceptions => true}.merge(options)
 
       # array of RuleSets
       @rules = []
+    
       
+      @loaded_uris = []
+    
       # unprocessed blocks of CSS
       @blocks = []
       reset!
@@ -103,6 +95,7 @@ module CssParser # :nodoc:
       block = convert_uris(block, options[:source_uri]) if options[:source_uri]
       
       parse_block_into_rule_sets!(block, options)
+      
     end
 
     # Add a CSS rule by setting the +selectors+, +declarations+ and +media_types+.
@@ -132,7 +125,7 @@ module CssParser # :nodoc:
       media_types = [media_types] if media_types.kind_of?(Symbol)
 
       @rules.each do |block|
-        if block[:media_types].any? { |mt| media_types.include?(mt) }
+        if media_types.include?(:all) or block[:media_types].any? { |mt| media_types.include?(mt) }
           yield block[:rules]
         end
       end
@@ -148,6 +141,15 @@ module CssParser # :nodoc:
           yield selectors, declarations, specificity
         end
       end
+    end
+
+    # Output all CSS rules as a single stylesheet.
+    def to_s(media_types = :all)
+      out = ''
+      each_selector(media_types) do |selectors, declarations, specificity|
+        out << "#{selectors} {\n#{declarations}\n}\n"
+      end
+      out
     end
 
     # Merge declarations with the same selector.
@@ -230,8 +232,6 @@ module CssParser # :nodoc:
     end
 
 
-
-
     # Perform a cascade to remove redundant CSS properties according to the CSS 2.1 cascading rules 
     # (http://www.w3.org/TR/REC-CSS2/cascade.html#cascading-order).
     #
@@ -250,6 +250,7 @@ module CssParser # :nodoc:
     #      color: red; font-style: italic;"
     #--
     # TODO: declaration_hashes should be able to contain a RuleSet
+    #       this should be a Class method
     def fold_declarations(declaration_hashes)
       # Attempt to load folded declaration from cache
       block_hash = Digest::MD5.hexdigest(declaration_hashes.inspect)
@@ -344,24 +345,27 @@ module CssParser # :nodoc:
     end
 
     # Load a remote CSS file.
-    #
-    # Follows <tt>@import</tt> links and loads them in order.
-    #
-    # Remote files are converted to UTF-8.
-    def load_file!(src, base_uri = nil)
+    def load_file!(uri, base_uri = nil, media_types = :all)
+      raise IOError, "can't load #{uri.to_s} more than once" if @loaded_uris.include?(uri)
 
-      imported_src = ''
+      base_uri = uri if base_uri.nil?
+      src, charset = read_remote_file(uri)
 
       # Load @imported CSS
-      src.scan(RE_AT_IMPORT_RULE).each do |import_rule|
+      src.scan(RE_AT_IMPORT_RULE).each do |import_rule|        
         import_path = import_rule[1].to_s.gsub(/['"]*/, '').strip
-        uri = URI.parse(base_uri.to_s).merge(import_path)
+        import_uri = URI.parse(base_uri.to_s).merge(import_path)
+        #puts import_uri.to_s
 
-        media_type = import_rule[import_rule.length] ||= ''
+        media_types = []
+        if media_string = import_rule[import_rule.length-1]
+          media_string.split(/\s|\,/).each do |t|
+            media_types << t.to_sym unless t.empty?
+          end
+        end
 
-        remote_src, remote_charset = read_remote_file(uri)
         # Recurse
-        load_file!(remote_src, uri)
+        load_file!(import_uri, nil, media_types)
       end
 
       # Remove @import declarations
@@ -370,7 +374,7 @@ module CssParser # :nodoc:
       # Relative paths need to be converted here
       src = Parser.convert_uris(src, base_uri) if base_uri and @options[:absolute_paths]
 
-      add_block!(src, :charset => charset)
+      add_block!(src, {:media_types => media_types})
     end
 
   protected
@@ -395,7 +399,12 @@ module CssParser # :nodoc:
     # Download a file into a string.
     #
     # Returns the file's data and character set in an array.
-    def read_remote_file(uri, target_charset = 'UTF-8') # :nodoc:
+    #--
+    # TODO: add option to fail silently or throw and exception on a 404
+    #++
+    def read_remote_file(uri) # :nodoc:
+
+      #fh = open(uri, 'rb')
       fh = open(uri, 'rb', 'User-Agent' => USER_AGENT, 'Accept-Encoding' => 'gzip')
 
       if fh.content_encoding.include?('gzip')
@@ -404,13 +413,13 @@ module CssParser # :nodoc:
         remote_src = fh.read
       end
 
-      #puts "reading #{uri}\n  charset: #{fh.charset}\n  enc: #{fh.content_encoding}\n"
+      #puts "reading #{uri} (#{fh.charset})"
 
-      #ic = Iconv.new('UTF-8//IGNORE', fh.charset)
-      #src = ic.iconv(remote_src)
+      ic = Iconv.new('UTF-8//IGNORE', fh.charset)
+      src = ic.iconv(remote_src)
 
       fh.close
-      return remote_src, fh.charset
+      return src, fh.charset
     end
 
     # Determine is a property should overwrite an existing propery

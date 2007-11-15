@@ -14,8 +14,8 @@ class CssParserBasicTests < Test::Unit::TestCase
   end
 
   def test_finding_by_selector
-    @cp.load_css!(@css)
-    assert_equal 'margin: 0px;', @cp.find('body').join
+    @cp.add_block!(@css)
+    assert_equal 'margin: 0px;', @cp.find('body').join(' ')
     assert_equal 'margin: 0px; padding: 0px;', @cp.find('p').join(' ')
   end
 
@@ -24,14 +24,16 @@ class CssParserBasicTests < Test::Unit::TestCase
     assert_equal 'margin: 0px;', @cp.find('body').join
   end
 
-  def test_rule_length
-    @cp.load_css!(@css)
-    assert_equal 3, @cp.length
+  def test_adding_a_rule
+    @cp.add_rule!('div', 'color: blue;')
+    assert_equal 'color: blue;', @cp.find('div').join(' ')
   end
 
   def test_adding_a_rule_set
-    @cp.add_rule_set!('div', 'color: blue;')
+    rs = CssParser::RuleSet.new('div', 'color: blue;')
+    @cp.add_rule_set!(rs)
     assert_equal 'color: blue;', @cp.find('div').join(' ')
   end
+
 
 end

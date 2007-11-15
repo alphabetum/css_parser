@@ -7,27 +7,6 @@ require 'lib/css_parser'
 
 include CssParser
 
-desc 'Default: parse a URL.'
-task :default => [:parse]
-
-desc 'Parse a URL and write out the output.'
-task :parse do
-  url = ENV['url']
-  
-  if !url or url.empty?
-    puts 'Usage: rake parse url=http://example.com/'
-    exit
-  end
-
-  premailer = Premailer.new(url, :warn_level => Premailer::Warnings::SAFE)
-  fout = File.open('out.html', "w")
-  fout.puts premailer.to_inline_css
-  fout.close
-
-  puts "Succesfully parsed '#{url}' into 'out.html'"
-  puts premailer.warnings.length.to_s + ' CSS warnings were found'
-end
-
 desc 'Run the unit tests.'
 Rake::TestTask.new do |t|
   t.libs << 'lib'
@@ -42,6 +21,7 @@ Rake::RDocTask.new(:rdoc) do |rdoc|
   rdoc.rdoc_dir = 'doc'
   rdoc.title    = 'CSS Parser'
   rdoc.options << '--all' << '--inline-source' << '--line-numbers'
+  rdoc.rdoc_files.include('README')
   rdoc.rdoc_files.include('CHANGELOG')
   rdoc.rdoc_files.include('LICENSE')
   rdoc.rdoc_files.include('lib/*.rb')
@@ -54,11 +34,11 @@ spec = Gem::Specification.new do |s|
   s.author = "Alex Dunae"
   s.homepage = "http://code.dunae.ca/css_parser"
   s.platform = Gem::Platform::RUBY
-  s.summary = "Set of classes for parsing CSS."
+  s.summary = "A set of classes for parsing CSS."
   s.files = FileList["{lib}/**/*"].to_a
   s.test_files = Dir.glob('test/test_*.rb') 
   s.has_rdoc = true
-  s.extra_rdoc_files = ["CHANGELOG", "LICENSE"]
+  s.extra_rdoc_files = ['README', 'CHANGELOG', 'LICENSE']
   s.rdoc_options << '--all' << '--inline-source' << '--line-numbers'
 end
 

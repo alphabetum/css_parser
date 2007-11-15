@@ -50,4 +50,10 @@ class CssParserMediaTypesTests < Test::Unit::TestCase
     assert_equal 'color: black;', @cp.find('body', :handheld).join(' ')
   end
 
+  def test_selecting_with_all_meda_type
+    @cp.add_rule!('body', 'color: black;', [:handheld,:tty])
+    assert_equal 'color: black;', @cp.find('body', :all).join(' ')
+  end
+
+
 end
